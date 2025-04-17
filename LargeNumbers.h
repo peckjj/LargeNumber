@@ -13,6 +13,9 @@ enum LargeNumberError {
 	SUCCESS,
 	PARSE_INVALID_CHAR,
 	PARSE_EMPTY_STR,
+	DIV_BY_ZERO,
+	INVALID_BASE,
+	LARGE_NUM_NULL,
 	LARGENUMBER_ERROR_COUNT
 };
 
@@ -53,9 +56,14 @@ typedef struct LargeNumberResult {
 */
 int LargeNumberFromDec(char* dec, size_t len, uint8_t sign, LargeNumberResult* result);
 int LargeNumberFromHex(char* hex, size_t len, uint8_t sign, LargeNumberResult* result);
-void LargeNumberToString(LargeNumber* num, char* buf, size_t n);
+LargeNumber* LargeNumberDigit(size_t magnitude);
+int LargeNumberToString(LargeNumber* num, uint8_t base, char* buf, size_t n);
+void LargeNumberToStringHex(LargeNumber* num, char* buf, size_t n);
+void LargeNumberCpy(LargeNumber* num, LargeNumberResult* result);
 void LargeNumberFree(LargeNumber* num);
 
 int8_t LargeNumberCmp(LargeNumber* a, LargeNumber* b);
+int8_t LargeNumberCmpZ(LargeNumber* a);
 void LargeNumberAdd(LargeNumber* a, LargeNumber* b, LargeNumberResult* result);
 void LargeNumberSub(LargeNumber* a, LargeNumber* b, LargeNumberResult* result);
+void LargeNumberMult(LargeNumber* a, LargeNumber* b, LargeNumberResult* result);

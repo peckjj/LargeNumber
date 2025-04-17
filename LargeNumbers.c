@@ -197,105 +197,132 @@ int LargeNumberFromHex(char* hex, size_t len, uint8_t sign, LargeNumberResult* r
 	return 0;
 }
 
-void LargeNumberToString(LargeNumber* num, char* buf, size_t n) {
-	if (!n) {
+void LargeNumberToStringHex(LargeNumber* num, char* buf, size_t n) {
+	size_t curPos = 0;
+
+	while (curPos < num->size && snprintf(buf, n, "%016lX ", num->data[curPos]) < n) {
+		n -= 17;
+		buf += 17;
+		curPos++;
+	}
+}
+
+int LargeNumberToString(LargeNumber* num, uint8_t base, char* buf, size_t n) {
+	if(n <  1) {
+		return SUCCESS;
+	}
+
+	if (base < 2 || base > 10) {
+		return INVALID_BASE;
+	}
+
+	LargeNumberResult* cloneRes = malloc(sizeof(LargeNumberResult));
+	LargeNumberCpy(num, cloneRes);
+
+	if (cloneRes->result == NULL) {
+		free(cloneRes);
+		return LARGE_NUM_NULL;
+	}
+
+	LargeNumber* cpy = cloneRes->result;
+
+	char* tmp = calloc( (num->size * 64) + 2, 1 );
+	size_t outputIdx = (num->size * 64) + 1;
+	tmp[outputIdx--] = '\0';
+	uint64_t c = 0;
+	uint64_t b = 0;
+	uint64_t b_h = 0;
+
+	size_t chunkIdx = 0;
+
+	uint64_t T = 0xFFFFFFFFFFFFFFFF;
+
+	while (LargeNumberCmpZ(cpy)) {
+		chunkIdx = cpy->size - 1;
+		while (!cpy->data[chunkIdx]) { 
+			chunkIdx--;
+		}
+
+		c = 0;
+
+		for (; chunkIdx < cpy->size; chunkIdx--) {
+			b = cpy->data[chunkIdx];
+
+			b_h = ((T / base) * c) + (((T % base + 1)*c + (b % base)) / base) + (b / base);
+
+			c = ( (((((T % base) + 1) % base) * c) % base) + (b % base) ) % base;
+
+			cpy->data[chunkIdx] = b_h;
+		}
+
+			tmp[outputIdx--] = c + '0';
+	}
+
+	// copy tmp in buf in reverse order
+	char* start = &(tmp[outputIdx + 1]);
+
+	if (cpy->sign) {
+		snprintf(buf, n, "-%s", start);
+	} else {
+		snprintf(buf, n, "%s", start);
+	}
+
+	LargeNumberFree(cpy);
+	free(cloneRes);
+	free(tmp);
+
+	return SUCCESS;
+}
+
+void LargeNumberCpy(LargeNumber* num, LargeNumberResult* result) {
+	result->result = NULL;
+
+	if (num == NULL) {
 		return;
 	}
-	// We need this much space at most to hold the base 10 number. This is derived
-	// via the following:
 
-	// If our number contains Z bits (digits), then the number < 2^Z
-	// The number of digits in base 10 which are required can be described as:
-	//
-	//	log_10(2^Z)
-	//
-	// By the formula of base-conversion with logarithms, we get the following, simplified in steps:
-	//	1. log_10(2^Z) = log_2(2^Z) / log_2(10)
-	//	2. log_10(2^Z) = Z / log_2(10)
-	//	3. Number of base 10 digits = Z / ~3.3
-	//
-	// Therefore, if we divide the number of digits in the LargeNumber by 3 (an over-correction) and add 2
-	// (1 to account for the minus sign, another to respect the fact that we may be wrong), then this should
-	// be enough space to perform the calc.
-	size_t spaceRequired = ((num->size * 64) / 3) + 2;
+	result->result = malloc(sizeof(LargeNumber));
+	result->result->data = malloc(sizeof(uint64_t) * num->size);
 
-	char* decimal = calloc(spaceRequired, 1);
-	char* decimal_temp = calloc(spaceRequired, 1);
+	memcpy(result->result->data, num->data, sizeof(uint64_t) * num->size);
+	result->result->size = num->size;
+	result->result->sign = num->sign;
+}
 
-	// `decimal` will hold the final result, which we will use to copy into `buf`. `decimal_temp`
-	// will be used to calculate each power of 2 as we encounter them in the LargeNumber, before
-	// it is added to `decimal`
+LargeNumber* LargeNumberDigit(size_t magnitude) {
+	LargeNumber* num = malloc( sizeof(LargeNumber) );
 
-	// For each 64-bit int
-	for (int curChunk = 0; curChunk < num->size; curChunk++) {
-		// For each bit
-		for (int curBit = 0; curBit < 64; curBit++) {
-		// If bit is on, put '1' in the first index of `decimal_temp`
-			if ( num->data[curChunk] & ((uint64_t)(1) << curBit) ) {
-				decimal_temp[0] = 1;
-				// for every power of that digit
-				size_t pow = (curChunk * 64) + curBit;
-				while (pow > 0) {
-					// multiple `decimal_temp` by 2
-					uint8_t carry = 0;
-					for (size_t curDigit = 0; curDigit < spaceRequired; curDigit++) {
-						decimal_temp[curDigit] *= 2;
-						decimal_temp[curDigit] += carry;
-						carry = decimal_temp[curDigit] / 10;
-						decimal_temp[curDigit] %= 10;
-					}
-					pow--;
-				}
-				// Add `decimal_temp` to `decimal`
-				uint8_t carry = 0;
-				for (size_t curDigit = 0; curDigit < spaceRequired; curDigit++) {
-					decimal[curDigit] += decimal_temp[curDigit] + carry;
-					carry = decimal[curDigit] / 10;
-					decimal[curDigit] %= 10;
-				}
-				// Zero `decimal_temp`
-				memset(decimal_temp, 0, spaceRequired);
-			}
-		}
-	}
+	size_t intsNeeded = (magnitude / 64) + 1;
+	uint8_t digit = magnitude % 64;
 
-	// copy `decimal` to `buf`
-	uint8_t firstNonZero = 0;
-	size_t outputIdx = 0;
+	num->size = intsNeeded;
+	num->data = calloc(num->size, sizeof(uint64_t));
+	num->sign = 0;
 
-	for (size_t digit = 0; digit < spaceRequired && outputIdx < n; digit++) {
-		if (digit == 0 && num->sign) {
-			buf[outputIdx] = '-';
-			outputIdx++;
-			continue;
-		}
+	num->data[num->size - 1] = ((uint64_t)1) << digit;
 
-		char curDigitValue = decimal[spaceRequired - (digit + 1)];
-		if (curDigitValue == 0 && !firstNonZero) {
-			continue;
-		}
-
-		firstNonZero = 1;
-		buf[outputIdx++] = curDigitValue + '0';
-	}
-
-	if (!firstNonZero) {
-		buf[0] = '0';
-		outputIdx++;
-	}
-
-	size_t lastIdx = outputIdx >= n ? (n - 1) : outputIdx;
-
-	buf[lastIdx] = '\0';
-
-	free(decimal);
-	free(decimal_temp);
+	ShrinkLargeNumber(num);
+	return num;
 }
 
 void LargeNumberFree(LargeNumber* num) {
 	free(num->data);
 	free(num);
 	num = NULL;
+}
+
+int8_t LargeNumberCmpZ(LargeNumber* a) {
+	if (a == NULL || a->data == NULL) {
+		return 0;
+	}
+
+	for (size_t i = 0; i < a->size; i++) {
+		if (a->data[i]) {
+			return a->sign ? -1: 1;
+		}
+	}
+
+	return 0;
 }
 
 int8_t LargeNumberCmp(LargeNumber* a, LargeNumber* b) {
@@ -470,3 +497,9 @@ void LargeNumberSub(LargeNumber* a, LargeNumber* b, LargeNumberResult* result) {
 	result->result->sign = sign;
 	result->error = SUCCESS;
 }
+/*
+void LargeNumberMult(LargeNumber* a, LargeNumber* b, LargeNumberResult* result) {
+
+
+}
+*/
